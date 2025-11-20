@@ -1,14 +1,17 @@
 import express from "express";
 import puppeteer from "puppeteer";
-import WebSocket, { WebSocketServer } from "ws";
+import { WebSocketServer } from "ws";
+import cors from "cors";
 
 const app = express();
+app.use(cors()); // Allow requests from any origin
+
 const wss = new WebSocketServer({ noServer: true });
 
-let page;
 let browser;
+let page;
 
-// Launch Puppeteer on Render
+// Start Puppeteer
 async function startBrowser() {
   browser = await puppeteer.launch({
     headless: false,
@@ -25,18 +28,15 @@ async function startBrowser() {
 
 startBrowser();
 
-// Navigate to URL endpoint
+// Navigate to URL
 app.get("/url", async (req, res) => {
   const url = req.query.url;
-  if (!url) return res.send("Missing ?url=");
+  if (!url) return res.status(400).send("Missing ?url=");
   await page.goto(url, { waitUntil: "networkidle0" });
-  res.send("Navigated!");
+  res.send("Navigated");
 });
 
-// Serve frontend
-app.use(express.static("public"));
-
-// WebSocket upgrade for input
+// WebSocket input forwarding
 const server = app.listen(3000, () => console.log("Server running on port 3000"));
 
 server.on("upgrade", (request, socket, head) => {
