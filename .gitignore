@@ -1,0 +1,11 @@
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files (if any secrets)
+.env
