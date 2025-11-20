@@ -4,14 +4,12 @@ import { WebSocketServer } from "ws";
 import cors from "cors";
 
 const app = express();
-app.use(cors()); // Allow requests from any origin
+app.use(cors());
 
 const wss = new WebSocketServer({ noServer: true });
 
-let browser;
-let page;
+let browser, page;
 
-// Start Puppeteer
 async function startBrowser() {
   browser = await puppeteer.launch({
     headless: false,
@@ -28,7 +26,6 @@ async function startBrowser() {
 
 startBrowser();
 
-// Navigate to URL
 app.get("/url", async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).send("Missing ?url=");
@@ -38,9 +35,8 @@ app.get("/url", async (req, res) => {
 
 // WebSocket input forwarding
 const server = app.listen(3000, () => console.log("Server running on port 3000"));
-
-server.on("upgrade", (request, socket, head) => {
-  wss.handleUpgrade(request, socket, head, (ws) => {
+server.on("upgrade", (req, socket, head) => {
+  wss.handleUpgrade(req, socket, head, (ws) => {
     ws.on("message", async (msg) => {
       const data = JSON.parse(msg.toString());
       if (data.type === "mouse") {
