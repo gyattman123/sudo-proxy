@@ -54,41 +54,42 @@ app.get("/browse/*", async (req, res) => {
       const u = new URL(target);
       const origin = u.origin;
 
-      // Rewrite relative href/src/action starting with "/"
+      // 1) Rewrite relative href/src/action starting with "/"
       html = html.replace(
         /(href|src|action)=["']\/(?!\/)/gi,
         (_, attr) => `${attr}="/browse/${enc(origin)}/`
       );
 
-      // Rewrite same-origin relative URLs (like href="login")
+      // 2) Rewrite same-origin relative URLs (like href="login")
       html = html.replace(
         /(href|src|action)=["'](?!https?:\/\/|\/\/|#|mailto:|tel:)([^"']+)["']/gi,
         (_, attr, path) => `${attr}="/browse/${enc(origin)}/${path}"`
       );
 
-      // Rewrite protocol-relative URLs (//domain.com/...)
+      // 3) Rewrite protocol-relative URLs (//domain.com/...)
       html = html.replace(
         /(href|src|action)=["']\/\/([^"']+)["']/gi,
         (_, attr, rest) => `${attr}="/browse/${enc(`https://${rest}`)}"`
       );
 
-      // Rewrite absolute URLs (https://domain/...)
+      // 4) Rewrite absolute URLs (https://domain/...)
       html = html.replace(
-        /(href|src|action)=["']https?:\/\/[^"']+["']/gi,
-        (match) => {
-          const url = match.split(/=["']/)[1].replace(/["']$/, "");
-          if (url.startsWith("/browse/")) return match; // already proxied
-          return `${match.slice(0, match.indexOf("="))}="/browse/${enc(url)}"`;
+        /(href|src|action)=["'](https?:\/\/[^"']+)["']/gi,
+        (_, attr, url) => {
+          if (url.startsWith("/browse/")) {
+            return `${attr}="${url}"`; // already proxied
+          }
+          return `${attr}="/browse/${enc(url)}"`;
         }
       );
 
-      // Rewrite API calls in JS
+      // 5) Rewrite API calls in JS
       html = html
         .replace(/fetch\(\s*["']\/(?!\/)/gi, `fetch("/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["']GET["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["']POST["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`);
 
-      // Rewrite window.location assignments
+      // 6) Rewrite window.location assignments
       html = html.replace(
         /(window\.location(?:\.href|\.assign|\.replace)\s*=\s*["'])(https?:\/\/[^"']+)["']/gi,
         (_, prefix, url) => {
