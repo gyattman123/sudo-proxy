@@ -49,36 +49,47 @@ app.get("/browse/*", async (req, res) => {
       const u = new URL(target);
       const origin = u.origin;
 
+      // Smarter rewrite guard
       html = html.replace(
-        /(href|src|action)=["']\/(?!\/)([^"']+)["']/gi,
-        (_, attr, path) => `${attr}="/browse/${enc(origin)}/${path}"`
-      );
-      html = html.replace(
-        /(href|src|action)=["'](?!https?:\/\/|\/\/|#|mailto:|tel:)([^"']+)["']/gi,
-        (_, attr, path) => `${attr}="/browse/${enc(origin)}/${path}"`
-      );
-      html = html.replace(
-        /(href|src|action)=["']\/\/([^"']+)["']/gi,
-        (_, attr, rest) => `${attr}="/browse/${enc(`https://${rest}`)}"`
-      );
-      html = html.replace(
-        /(href|src|action)=["'](https?:\/\/[^"']+)["']/gi,
+        /(href|src|action)=["']([^"']+)["']/gi,
         (_, attr, url) => {
-          if (url.startsWith("/browse/")) return `${attr}="${url}"`;
-          return `${attr}="/browse/${enc(url)}"`;
+          // Skip if already proxied
+          if (url.startsWith("/browse/") || url.includes("/browse/https")) {
+            return `${attr}="${url}"`;
+          }
+
+          // Absolute URL
+          if (/^https?:\/\//.test(url)) {
+            return `${attr}="/browse/${enc(url)}"`;
+          }
+
+          // Protocol-relative
+          if (/^\/\/[^/]/.test(url)) {
+            return `${attr}="/browse/${enc(`https:${url}`)}"`;
+          }
+
+          // Relative path
+          return `${attr}="/browse/${enc(origin)}/${url}"`;
         }
       );
 
+      // Rewrite API calls
       html = html
         .replace(/fetch\(\s*["']\/(?!\/)/gi, `fetch("/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["']GET["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["']POST["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`);
 
+      // Rewrite window.location
       html = html.replace(
-        /(window\.location(?:\.href|\.assign|\.replace)\s*=\s*["'])(https?:\/\/[^"']+)["']/gi,
+        /(window\.location(?:\.href|\.assign|\.replace)\s*=\s*["'])([^"']+)["']/gi,
         (_, prefix, url) => {
-          if (url.startsWith("/browse/")) return `${prefix}${url}"`;
-          return `${prefix}/browse/${enc(url)}"`;
+          if (url.startsWith("/browse/") || url.includes("/browse/https")) {
+            return `${prefix}${url}"`;
+          }
+          if (/^https?:\/\//.test(url)) {
+            return `${prefix}/browse/${enc(url)}"`;
+          }
+          return `${prefix}/browse/${enc(new URL(url, target).toString())}"`;
         }
       );
 
