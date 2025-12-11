@@ -96,11 +96,9 @@ app.get("/browse/*", async (req, res) => {
 
     const buffer = Buffer.from(await upstream.arrayBuffer());
 
-    // Fix MIME type for .js and .css
+    // Fix MIME type for .js files
     if (target.endsWith(".js")) {
       res.setHeader("Content-Type", "application/javascript");
-    } else if (target.endsWith(".css")) {
-      res.setHeader("Content-Type", "text/css");
     }
 
     res.status(upstream.status).end(buffer);
