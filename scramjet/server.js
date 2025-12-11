@@ -10,12 +10,12 @@ const BLOCKED_HEADERS = [
   "transfer-encoding",
   "content-security-policy",
   "x-frame-options",
-  "set-cookie",
   "strict-transport-security"
 ];
 
 app.get("/browse/*", async (req, res) => {
   const target = decodeURIComponent(req.params[0]);
+  console.log("Proxying:", target); // 🔍 Debug log
 
   try {
     const upstream = await fetch(target, {
@@ -34,14 +34,15 @@ app.get("/browse/*", async (req, res) => {
       return res.status(upstream.status).end();
     }
 
+    const ct = upstream.headers.get("content-type") || "";
+
+    // Copy headers (preserve content-type!)
     upstream.headers.forEach((v, k) => {
       const lower = k.toLowerCase();
       if (!BLOCKED_HEADERS.includes(lower)) {
         res.setHeader(k, v);
       }
     });
-
-    const ct = upstream.headers.get("content-type") || "";
 
     if (ct.includes("text/html")) {
       let html = await upstream.text();
@@ -52,17 +53,14 @@ app.get("/browse/*", async (req, res) => {
         /(href|src|action)=["']\/(?!\/)([^"']+)["']/gi,
         (_, attr, path) => `${attr}="/browse/${enc(origin)}/${path}"`
       );
-
       html = html.replace(
         /(href|src|action)=["'](?!https?:\/\/|\/\/|#|mailto:|tel:)([^"']+)["']/gi,
         (_, attr, path) => `${attr}="/browse/${enc(origin)}/${path}"`
       );
-
       html = html.replace(
         /(href|src|action)=["']\/\/([^"']+)["']/gi,
         (_, attr, rest) => `${attr}="/browse/${enc(`https://${rest}`)}"`
       );
-
       html = html.replace(
         /(href|src|action)=["'](https?:\/\/[^"']+)["']/gi,
         (_, attr, url) => {
@@ -96,9 +94,19 @@ app.get("/browse/*", async (req, res) => {
 
     const buffer = Buffer.from(await upstream.arrayBuffer());
 
-    // Fix MIME type for .js files
-    if (target.endsWith(".js")) {
-      res.setHeader("Content-Type", "application/javascript");
+    // Fallback MIME types
+    if (!ct || ct === "application/octet-stream") {
+      if (target.endsWith(".js")) {
+        res.setHeader("Content-Type", "application/javascript");
+      } else if (target.endsWith(".css")) {
+        res.setHeader("Content-Type", "text/css");
+      } else if (target.endsWith(".svg")) {
+        res.setHeader("Content-Type", "image/svg+xml");
+      } else if (target.endsWith(".json")) {
+        res.setHeader("Content-Type", "application/json");
+      } else if (target.endsWith(".wasm")) {
+        res.setHeader("Content-Type", "application/wasm");
+      }
     }
 
     res.status(upstream.status).end(buffer);
