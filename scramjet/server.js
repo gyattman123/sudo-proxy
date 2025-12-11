@@ -1,7 +1,3 @@
-// server.js
-// Scramjet-style proxy with safe buffering, header stripping,
-// and HTML rewriting for relative + absolute links and API calls.
-
 import express from "express";
 import fetch from "node-fetch";
 
@@ -29,7 +25,6 @@ app.get("/browse/*", async (req, res) => {
       }
     });
 
-    // Handle redirects
     if (String(upstream.status).startsWith("3")) {
       const loc = upstream.headers.get("location");
       if (loc) {
@@ -39,7 +34,6 @@ app.get("/browse/*", async (req, res) => {
       return res.status(upstream.status).end();
     }
 
-    // Copy headers but strip problematic ones
     upstream.headers.forEach((v, k) => {
       const lower = k.toLowerCase();
       if (!BLOCKED_HEADERS.includes(lower)) {
@@ -54,43 +48,34 @@ app.get("/browse/*", async (req, res) => {
       const u = new URL(target);
       const origin = u.origin;
 
-      // 1) Rewrite relative href/src/action starting with "/"
       html = html.replace(
         /(href|src|action)=["']\/(?!\/)([^"']+)["']/gi,
         (_, attr, path) => `${attr}="/browse/${enc(origin)}/${path}"`
       );
 
-      // 2) Rewrite same-origin relative URLs (like href="login")
       html = html.replace(
         /(href|src|action)=["'](?!https?:\/\/|\/\/|#|mailto:|tel:)([^"']+)["']/gi,
         (_, attr, path) => `${attr}="/browse/${enc(origin)}/${path}"`
       );
 
-      // 3) Rewrite protocol-relative URLs (//domain.com/...)
       html = html.replace(
         /(href|src|action)=["']\/\/([^"']+)["']/gi,
         (_, attr, rest) => `${attr}="/browse/${enc(`https://${rest}`)}"`
       );
 
-      // 4) Rewrite absolute URLs (https://domain/...)
       html = html.replace(
         /(href|src|action)=["'](https?:\/\/[^"']+)["']/gi,
         (_, attr, url) => {
-          // Guard: don't rewrite if already proxied
-          if (url.startsWith("/browse/")) {
-            return `${attr}="${url}"`;
-          }
+          if (url.startsWith("/browse/")) return `${attr}="${url}"`;
           return `${attr}="/browse/${enc(url)}"`;
         }
       );
 
-      // 5) Rewrite API calls in JS
       html = html
         .replace(/fetch\(\s*["']\/(?!\/)/gi, `fetch("/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["']GET["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["']POST["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`);
 
-      // 6) Rewrite window.location assignments
       html = html.replace(
         /(window\.location(?:\.href|\.assign|\.replace)\s*=\s*["'])(https?:\/\/[^"']+)["']/gi,
         (_, prefix, url) => {
@@ -109,8 +94,13 @@ app.get("/browse/*", async (req, res) => {
       return;
     }
 
-    // Binary or other content
     const buffer = Buffer.from(await upstream.arrayBuffer());
+
+    // Fix MIME type for .js files
+    if (target.endsWith(".js")) {
+      res.setHeader("Content-Type", "application/javascript");
+    }
+
     res.status(upstream.status).end(buffer);
 
   } catch (err) {
@@ -118,11 +108,8 @@ app.get("/browse/*", async (req, res) => {
   }
 });
 
-// Root health check
 app.get("/", (_, res) => {
-  res.send(
-    'Scramjet proxy is running. Use /browse/<encoded_url>. Example: /browse/https%3A%2F%2Fexample.com'
-  );
+  res.send('Scramjet proxy is running. Use /browse/<encoded_url>.');
 });
 
 const port = process.env.PORT || 8080;
