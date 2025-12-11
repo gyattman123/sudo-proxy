@@ -3,20 +3,30 @@ import fetch from "node-fetch";
 
 const app = express();
 
-app.get("/browse/:encoded", async (req, res) => {
-  const target = decodeURIComponent(req.params.encoded);
-  const upstream = await fetch(target, { redirect: "manual" });
+app.get("/browse/*", async (req, res) => {
+  const target = decodeURIComponent(req.params[0]);
 
-  if (String(upstream.status).startsWith("3")) {
-    const loc = upstream.headers.get("location");
-    return res.redirect("/browse/" + encodeURIComponent(new URL(loc, target).toString()));
+  try {
+    const upstream = await fetch(target, { redirect: "manual" });
+
+    // Handle redirects
+    if (String(upstream.status).startsWith("3")) {
+      const loc = upstream.headers.get("location");
+      const absolute = new URL(loc, target).toString();
+      return res.redirect("/browse/" + encodeURIComponent(absolute));
+    }
+
+    // Copy headers
+    upstream.headers.forEach((v, k) => res.setHeader(k, v));
+
+    // Buffer the body safely
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    res.status(upstream.status).end(buffer);
+
+  } catch (err) {
+    res.status(500).send("Proxy error: " + err.message);
   }
-
-  res.status(upstream.status);
-  upstream.headers.forEach((v, k) => res.setHeader(k, v));
-  upstream.body.pipe(res);
 });
 
 const port = process.env.PORT || 8080;
 app.listen(port, () => console.log(`Scramjet proxy on ${port}`));
-
