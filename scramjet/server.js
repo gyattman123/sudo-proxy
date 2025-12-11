@@ -16,8 +16,12 @@ app.get("/browse/*", async (req, res) => {
       return res.redirect("/browse/" + encodeURIComponent(absolute));
     }
 
-    // Copy headers
-    upstream.headers.forEach((v, k) => res.setHeader(k, v));
+    // Copy headers but strip content-encoding
+    upstream.headers.forEach((v, k) => {
+      if (k.toLowerCase() !== "content-encoding") {
+        res.setHeader(k, v);
+      }
+    });
 
     // Buffer the body safely
     const buffer = Buffer.from(await upstream.arrayBuffer());
