@@ -16,9 +16,14 @@ app.get("/browse/*", async (req, res) => {
       return res.redirect("/browse/" + encodeURIComponent(absolute));
     }
 
-    // Copy headers but strip content-encoding
+    // Copy headers but strip problematic ones
     upstream.headers.forEach((v, k) => {
-      if (k.toLowerCase() !== "content-encoding") {
+      const lower = k.toLowerCase();
+      if (
+        lower !== "content-encoding" &&
+        lower !== "content-length" &&
+        lower !== "transfer-encoding"
+      ) {
         res.setHeader(k, v);
       }
     });
