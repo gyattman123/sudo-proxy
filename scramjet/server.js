@@ -76,8 +76,9 @@ app.get("/browse/*", async (req, res) => {
       html = html.replace(
         /(href|src|action)=["'](https?:\/\/[^"']+)["']/gi,
         (_, attr, url) => {
+          // Guard: don't rewrite if already proxied
           if (url.startsWith("/browse/")) {
-            return `${attr}="${url}"`; // already proxied
+            return `${attr}="${url}"`;
           }
           return `${attr}="/browse/${enc(url)}"`;
         }
