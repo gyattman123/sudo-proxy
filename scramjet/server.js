@@ -156,4 +156,11 @@ app.get("/browse/*", async (req, res) => {
         /(href|src|action)=["']([^"']+)["']/gi,
         (_, attr, url) => {
           if (url.startsWith("/browse/") || url.includes("/browse/https")) return `${attr}="${url}"`;
-          if (/^\/assets\/[^"']
+          if (/^\/assets\/[^"']+$/.test(url)) return `${attr}="/assets/${url.replace(/^\/assets\//, "")}"`;
+          if (/^[^\/]*assets\/[^"']+$/.test(url)) {
+            const file = url.replace(/^.*assets\//, "");
+            return `${attr}="/assets/${file}"`;
+          }
+          if (/^https?:\/\//.test(url)) return `${attr}="/browse/${enc(url)}"`;
+          if (/^\/\/[^/]/.test(url)) return `${attr}="/browse/${enc(`https:${url}`)}"`;
+          if
