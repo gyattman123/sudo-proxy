@@ -94,6 +94,13 @@ app.get("/browse/*", async (req, res) => {
 
     const buffer = Buffer.from(await upstream.arrayBuffer());
 
+    // Handle 404 for .js and .css to avoid nosniff + syntax errors
+    if (upstream.status === 404 && (target.endsWith(".js") || target.endsWith(".css"))) {
+      console.warn("404 asset:", target);
+      res.setHeader("Content-Type", target.endsWith(".js") ? "application/javascript" : "text/css");
+      return res.status(200).send("");
+    }
+
     // Fallback MIME types
     if (!ct || ct === "application/octet-stream") {
       if (target.endsWith(".js")) {
