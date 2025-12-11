@@ -56,8 +56,8 @@ app.get("/browse/*", async (req, res) => {
 
       // 1) Rewrite relative href/src/action starting with "/"
       html = html.replace(
-        /(href|src|action)=["']\/(?!\/)/gi,
-        (_, attr) => `${attr}="/browse/${enc(origin)}/`
+        /(href|src|action)=["']\/(?!\/)([^"']+)["']/gi,
+        (_, attr, path) => `${attr}="/browse/${enc(origin)}/${path}"`
       );
 
       // 2) Rewrite same-origin relative URLs (like href="login")
