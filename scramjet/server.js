@@ -1,16 +1,8 @@
-// server.js
-// Generic robust proxy with login redirect, asset passthrough, exhaustive MIME coverage,
-// double-rewrite guards, source-map handling, wasm/font correctness,
-// cookie preservation, strict nosniff-safe responses, and debug logging.
-
 import express from "express";
 import fetch from "node-fetch";
 
 const app = express();
 const enc = (url) => encodeURIComponent(url);
-
-app.use(express.json({ limit: "5mb" }));
-app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
 const BLOCKED_HEADERS = [
   "content-encoding",
@@ -23,10 +15,9 @@ const BLOCKED_HEADERS = [
 
 const MIME_BY_EXT = (path) => {
   const p = path.toLowerCase();
-  if (p.endsWith(".js") || p.endsWith(".mjs") || p.endsWith(".cjs") || p.endsWith(".jsx")) return "application/javascript";
-  if (p.endsWith(".ts") || p.endsWith(".tsx")) return "application/typescript";
+  if (p.endsWith(".js")) return "application/javascript";
   if (p.endsWith(".css")) return "text/css";
-  if (p.endsWith(".html") || p.endsWith(".htm")) return "text/html";
+  if (p.endsWith(".html")) return "text/html";
   if (p.endsWith(".json")) return "application/json";
   if (p.endsWith(".map")) return "application/json";
   if (p.endsWith(".png")) return "image/png";
@@ -38,17 +29,12 @@ const MIME_BY_EXT = (path) => {
   if (p.endsWith(".woff")) return "font/woff";
   if (p.endsWith(".ttf")) return "font/ttf";
   if (p.endsWith(".otf")) return "font/otf";
-  if (p.endsWith(".mp3")) return "audio/mpeg";
-  if (p.endsWith(".wav")) return "audio/wav";
   if (p.endsWith(".mp4")) return "video/mp4";
   if (p.endsWith(".webm")) return "video/webm";
   if (p.endsWith(".pdf")) return "application/pdf";
   if (p.endsWith(".wasm")) return "application/wasm";
   return null;
 };
-
-const EXECUTABLE_OR_RENDERED = [".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".css", ".map", ".wasm", ".woff", ".woff2"];
-const isExecutableOrRendered404 = (path) => EXECUTABLE_OR_RENDERED.some((ext) => path.toLowerCase().endsWith(ext));
 
 const setStrictMimeIfNeeded = (res, url, ct) => {
   if (!ct || ct === "application/octet-stream") {
@@ -58,40 +44,7 @@ const setStrictMimeIfNeeded = (res, url, ct) => {
   if (url.toLowerCase().endsWith(".wasm")) res.setHeader("Content-Type", "application/wasm");
 };
 
-// Asset passthrough
-app.get("/assets/*", async (req, res) => {
-  const assetPath = req.params[0];
-  const assetUrl = `https://${req.headers.host}/assets/${assetPath}`;
-  console.log("Proxying asset:", assetUrl);
-
-  try {
-    const upstream = await fetch(assetUrl, {
-      redirect: "manual",
-      headers: {
-        "User-Agent": req.headers["user-agent"] || "Mozilla/5.0",
-        ...(req.headers.origin ? { Origin: req.headers.origin } : {}),
-        ...(req.headers.referer ? { Referer: req.headers.referer } : {})
-      }
-    });
-
-    const ct = upstream.headers.get("content-type") || "";
-    upstream.headers.forEach((v, k) => { if (!BLOCKED_HEADERS.includes(k.toLowerCase())) res.setHeader(k, v); });
-    setStrictMimeIfNeeded(res, assetUrl, ct);
-
-    if (upstream.status === 404 && isExecutableOrRendered404(assetUrl)) {
-      res.setHeader("Content-Type", MIME_BY_EXT(assetUrl) || "application/octet-stream");
-      return res.status(200).send("");
-    }
-
-    const buffer = Buffer.from(await upstream.arrayBuffer());
-    return res.status(upstream.status).end(buffer);
-  } catch (err) {
-    console.error("Asset proxy error:", err);
-    return res.status(500).send("Asset proxy error: " + err.message);
-  }
-});
-
-// Main browsing route
+// Main browsing route: everything goes through here
 app.get("/browse/*", async (req, res) => {
   const target = decodeURIComponent(req.params[0]);
   console.log("Proxying:", target);
@@ -107,25 +60,23 @@ app.get("/browse/*", async (req, res) => {
     });
 
     const ct = upstream.headers.get("content-type") || "";
-    upstream.headers.forEach((v, k) => { if (!BLOCKED_HEADERS.includes(k.toLowerCase())) res.setHeader(k, v); });
+    upstream.headers.forEach((v, k) => {
+      if (!BLOCKED_HEADERS.includes(k.toLowerCase())) res.setHeader(k, v);
+    });
 
     if (ct.includes("text/html")) {
       let html = await upstream.text();
       const origin = new URL(target).origin;
 
+      // Rewrite all href/src/action attributes
       html = html.replace(
         /(href|src|action)=["']([^"']+)["']/gi,
         (_, attr, url) => {
-          if (url.startsWith("/browse/") || url.includes("/browse/https")) return `${attr}="${url}"`;
-          if (/^\/assets\/[^"']+$/.test(url)) return `${attr}="/assets/${url.replace(/^\/assets\//, "")}"`;
-          if (/^[^\/]*assets\/[^"']+$/.test(url)) {
-            const file = url.replace(/^.*assets\//, "");
-            return `${attr}="/assets/${file}"`;
-          }
+          if (url.startsWith("/browse/")) return `${attr}="${url}"`;
           if (/^https?:\/\//.test(url)) return `${attr}="/browse/${enc(url)}"`;
+          if (/^\/[^/]/.test(url)) return `${attr}="/browse/${enc(origin + url)}"`;
           if (/^\/\/[^/]/.test(url)) return `${attr}="/browse/${enc(`https:${url}`)}"`;
-          if (url.toLowerCase().endsWith(".map")) return `${attr}="/browse/${enc(origin)}/${url}"`;
-          return `${attr}="/browse/${enc(origin)}/${url}"`;
+          return `${attr}="/browse/${enc(origin + "/" + url)}"`;
         }
       );
 
@@ -139,13 +90,8 @@ app.get("/browse/*", async (req, res) => {
 
     const buffer = Buffer.from(await upstream.arrayBuffer());
     setStrictMimeIfNeeded(res, target, ct);
-
-    if (upstream.status === 404 && isExecutableOrRendered404(target)) {
-      res.setHeader("Content-Type", MIME_BY_EXT(target) || "application/octet-stream");
-      return res.status(200).send("");
-    }
-
     return res.status(upstream.status).end(buffer);
+
   } catch (err) {
     console.error("Proxy error:", err);
     return res.status(500).send("Proxy error: " + err.message);
@@ -154,7 +100,7 @@ app.get("/browse/*", async (req, res) => {
 
 // Root route
 app.get("/", (_, res) => {
-  res.send("Generic proxy is running. Use /browse/<encoded_url>. Assets via /assets/<file>.");
+  res.send("Proxy is running. Use /browse/<encoded_url>.");
 });
 
 const port = process.env.PORT || 10000;
