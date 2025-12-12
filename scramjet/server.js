@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import fetch from "node-fetch";
 
@@ -32,8 +31,6 @@ const MIME_BY_EXT = (path) => {
   if (p.endsWith(".woff")) return "font/woff";
   if (p.endsWith(".ttf")) return "font/ttf";
   if (p.endsWith(".otf")) return "font/otf";
-  if (p.endsWith(".mp3")) return "audio/mpeg";
-  if (p.endsWith(".wav")) return "audio/wav";
   if (p.endsWith(".mp4")) return "video/mp4";
   if (p.endsWith(".webm")) return "video/webm";
   if (p.endsWith(".pdf")) return "application/pdf";
@@ -103,7 +100,7 @@ app.get("/browse/*", async (req, res) => {
     setStrictMimeIfNeeded(res, target, ct);
 
     if (upstream.status === 404 && isExecutableOrRendered404(target)) {
-      res.setHeader("Content-Type", MIME_BY_EXT(target) || "application/octet-stream");
+      res.setHeader("Content-Type", MIME_BY_EXT(target) || "application/javascript");
       return res.status(200).send("");
     }
 
