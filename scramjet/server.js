@@ -24,6 +24,7 @@ const MIME_BY_EXT = (path) => {
   if (p.endsWith(".png")) return "image/png";
   if (p.endsWith(".jpg") || p.endsWith(".jpeg")) return "image/jpeg";
   if (p.endsWith(".gif")) return "image/gif";
+  if (p.endsWith(".webp")) return "image/webp";
   if (p.endsWith(".svg")) return "image/svg+xml";
   if (p.endsWith(".ico")) return "image/x-icon";
   if (p.endsWith(".woff2")) return "font/woff2";
@@ -48,7 +49,6 @@ const setStrictMimeIfNeeded = (res, url, ct) => {
   if (url.toLowerCase().endsWith(".wasm")) res.setHeader("Content-Type", "application/wasm");
 };
 
-// Main proxy route
 app.get("/browse/*", async (req, res) => {
   const target = decodeURIComponent(req.params[0]);
   console.log("Proxying:", target);
@@ -117,7 +117,6 @@ app.get("/browse/*", async (req, res) => {
   }
 });
 
-// Root route
 app.get("/", (_, res) => {
   res.send("Proxy is running. Use /browse/<encoded_url>. All traffic flows through /browse/<origin>/<path>.");
 });
