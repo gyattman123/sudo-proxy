@@ -17,14 +17,13 @@ const MIME_BY_EXT = (path) => {
   const p = path.toLowerCase();
   if (p.endsWith(".js") || p.endsWith(".mjs") || p.endsWith(".cjs") || p.endsWith(".jsx")) return "application/javascript";
   if (p.endsWith(".ts") || p.endsWith(".tsx")) return "application/typescript";
-  if (p.endsWith(".css") || p.endsWith(".less") || p.endsWith(".sass") || p.endsWith(".scss")) return "text/css";
+  if (p.endsWith(".css")) return "text/css";
   if (p.endsWith(".html") || p.endsWith(".htm")) return "text/html";
   if (p.endsWith(".json")) return "application/json";
   if (p.endsWith(".map")) return "application/json";
   if (p.endsWith(".png")) return "image/png";
   if (p.endsWith(".jpg") || p.endsWith(".jpeg")) return "image/jpeg";
   if (p.endsWith(".gif")) return "image/gif";
-  if (p.endsWith(".webp")) return "image/webp";
   if (p.endsWith(".svg")) return "image/svg+xml";
   if (p.endsWith(".ico")) return "image/x-icon";
   if (p.endsWith(".woff2")) return "font/woff2";
@@ -42,8 +41,8 @@ const EXECUTABLE_OR_RENDERED = [".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".
 const isExecutableOrRendered404 = (path) => EXECUTABLE_OR_RENDERED.some((ext) => path.toLowerCase().endsWith(ext));
 
 const setStrictMimeIfNeeded = (res, url, ct) => {
+  const mime = MIME_BY_EXT(url);
   if (!ct || ct === "application/octet-stream") {
-    const mime = MIME_BY_EXT(url);
     if (mime) res.setHeader("Content-Type", mime);
   }
   if (url.toLowerCase().endsWith(".wasm")) res.setHeader("Content-Type", "application/wasm");
@@ -73,6 +72,7 @@ app.get("/browse/*", async (req, res) => {
       let html = await upstream.text();
       const origin = new URL(target).origin;
 
+      // Rewrite all href/src/action attributes
       html = html.replace(
         /(href|src|action)=["']([^"']+)["']/gi,
         (_, attr, url) => {
@@ -80,10 +80,17 @@ app.get("/browse/*", async (req, res) => {
           if (/^https?:\/\//.test(url)) return `${attr}="/browse/${enc(url)}"`;
           if (/^\/[^/]/.test(url)) return `${attr}="/browse/${enc(origin + url)}"`;
           if (/^\/\/[^/]/.test(url)) return `${attr}="/browse/${enc(`https:${url}`)}"`;
+
+          // Catch asset folders like /w/assets, /a/assets
+          if (/^(\/w\/assets|\/a\/assets|\/assets)\//.test(url)) {
+            return `${attr}="/browse/${enc(origin + url)}"`;
+          }
+
           return `${attr}="/browse/${enc(origin + "/" + url)}"`;
         }
       );
 
+      // Rewrite fetch/xhr calls
       html = html
         .replace(/fetch\(\s*["']\/(?!\/)/gi, `fetch("/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["'](GET|POST|PUT|PATCH|DELETE)["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`);
@@ -99,6 +106,7 @@ app.get("/browse/*", async (req, res) => {
     const buffer = Buffer.from(await upstream.arrayBuffer());
     setStrictMimeIfNeeded(res, target, ct);
 
+    // Fallback for 404 scripts/styles
     if (upstream.status === 404 && isExecutableOrRendered404(target)) {
       res.setHeader("Content-Type", MIME_BY_EXT(target) || "application/javascript");
       return res.status(200).send("");
