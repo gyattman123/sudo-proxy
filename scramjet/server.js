@@ -42,7 +42,7 @@ const isExecutableOrRendered404 = (path) => EXECUTABLE_OR_RENDERED.some((ext) =>
 
 const setStrictMimeIfNeeded = (res, url, ct) => {
   const mime = MIME_BY_EXT(url);
-  if (!ct || ct === "application/octet-stream") {
+  if (!ct || ct === "application/octet-stream" || ct === "text/html") {
     if (mime) res.setHeader("Content-Type", mime);
   }
   if (url.toLowerCase().endsWith(".wasm")) res.setHeader("Content-Type", "application/wasm");
@@ -72,7 +72,6 @@ app.get("/browse/*", async (req, res) => {
       let html = await upstream.text();
       const origin = new URL(target).origin;
 
-      // Rewrite all href/src/action attributes
       html = html.replace(
         /(href|src|action)=["']([^"']+)["']/gi,
         (_, attr, url) => {
@@ -81,8 +80,8 @@ app.get("/browse/*", async (req, res) => {
           if (/^\/[^/]/.test(url)) return `${attr}="/browse/${enc(origin + url)}"`;
           if (/^\/\/[^/]/.test(url)) return `${attr}="/browse/${enc(`https:${url}`)}"`;
 
-          // Catch asset folders like /w/assets, /a/assets
-          if (/^(\/w\/assets|\/a\/assets|\/assets)\//.test(url)) {
+          // Catch asset folders and typo variants
+          if (/^(\/w\/assets|\/a\/assets|\/assets|\/asstes|\/asssets)\//.test(url)) {
             return `${attr}="/browse/${enc(origin + url)}"`;
           }
 
@@ -90,7 +89,6 @@ app.get("/browse/*", async (req, res) => {
         }
       );
 
-      // Rewrite fetch/xhr calls
       html = html
         .replace(/fetch\(\s*["']\/(?!\/)/gi, `fetch("/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["'](GET|POST|PUT|PATCH|DELETE)["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`);
@@ -106,7 +104,6 @@ app.get("/browse/*", async (req, res) => {
     const buffer = Buffer.from(await upstream.arrayBuffer());
     setStrictMimeIfNeeded(res, target, ct);
 
-    // Fallback for 404 scripts/styles
     if (upstream.status === 404 && isExecutableOrRendered404(target)) {
       res.setHeader("Content-Type", MIME_BY_EXT(target) || "application/javascript");
       return res.status(200).send("");
