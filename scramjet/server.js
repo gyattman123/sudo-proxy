@@ -1,11 +1,4 @@
 // server.js
-// Generic robust proxy with uniform /browse/<origin>/<path> routing.
-// Features:
-// - All links rewritten into /browse/<origin>/<path>
-// - Exhaustive MIME coverage + nosniff-safe fallbacks
-// - Cookie preservation
-// - Debug logging
-
 import express from "express";
 import fetch from "node-fetch";
 
@@ -23,22 +16,24 @@ const BLOCKED_HEADERS = [
 
 const MIME_BY_EXT = (path) => {
   const p = path.toLowerCase();
-  if (p.endsWith(".js")) return "application/javascript";
-  if (p.endsWith(".mjs") || p.endsWith(".cjs") || p.endsWith(".jsx")) return "application/javascript";
+  if (p.endsWith(".js") || p.endsWith(".mjs") || p.endsWith(".cjs") || p.endsWith(".jsx")) return "application/javascript";
   if (p.endsWith(".ts") || p.endsWith(".tsx")) return "application/typescript";
-  if (p.endsWith(".css")) return "text/css";
+  if (p.endsWith(".css") || p.endsWith(".less") || p.endsWith(".sass") || p.endsWith(".scss")) return "text/css";
   if (p.endsWith(".html") || p.endsWith(".htm")) return "text/html";
   if (p.endsWith(".json")) return "application/json";
   if (p.endsWith(".map")) return "application/json";
   if (p.endsWith(".png")) return "image/png";
   if (p.endsWith(".jpg") || p.endsWith(".jpeg")) return "image/jpeg";
   if (p.endsWith(".gif")) return "image/gif";
+  if (p.endsWith(".webp")) return "image/webp";
   if (p.endsWith(".svg")) return "image/svg+xml";
   if (p.endsWith(".ico")) return "image/x-icon";
   if (p.endsWith(".woff2")) return "font/woff2";
   if (p.endsWith(".woff")) return "font/woff";
   if (p.endsWith(".ttf")) return "font/ttf";
   if (p.endsWith(".otf")) return "font/otf";
+  if (p.endsWith(".mp3")) return "audio/mpeg";
+  if (p.endsWith(".wav")) return "audio/wav";
   if (p.endsWith(".mp4")) return "video/mp4";
   if (p.endsWith(".webm")) return "video/webm";
   if (p.endsWith(".pdf")) return "application/pdf";
@@ -57,7 +52,7 @@ const setStrictMimeIfNeeded = (res, url, ct) => {
   if (url.toLowerCase().endsWith(".wasm")) res.setHeader("Content-Type", "application/wasm");
 };
 
-// Main browsing route: everything goes through here
+// Main proxy route
 app.get("/browse/*", async (req, res) => {
   const target = decodeURIComponent(req.params[0]);
   console.log("Proxying:", target);
@@ -81,19 +76,17 @@ app.get("/browse/*", async (req, res) => {
       let html = await upstream.text();
       const origin = new URL(target).origin;
 
-      // Rewrite all href/src/action attributes
       html = html.replace(
         /(href|src|action)=["']([^"']+)["']/gi,
         (_, attr, url) => {
           if (url.startsWith("/browse/")) return `${attr}="${url}"`;
           if (/^https?:\/\//.test(url)) return `${attr}="/browse/${enc(url)}"`;
-          if (/^\/[^/]/.test(url)) return `${attr}="/browse/${enc(origin + url)}"`; // handles /login, /register, /api, /assets
+          if (/^\/[^/]/.test(url)) return `${attr}="/browse/${enc(origin + url)}"`;
           if (/^\/\/[^/]/.test(url)) return `${attr}="/browse/${enc(`https:${url}`)}"`;
           return `${attr}="/browse/${enc(origin + "/" + url)}"`;
         }
       );
 
-      // Rewrite fetch/xhr calls
       html = html
         .replace(/fetch\(\s*["']\/(?!\/)/gi, `fetch("/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["'](GET|POST|PUT|PATCH|DELETE)["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`);
@@ -124,7 +117,7 @@ app.get("/browse/*", async (req, res) => {
 
 // Root route
 app.get("/", (_, res) => {
-  res.send("Proxy is running. Use /browse/<encoded_url>. All files route through /browse/<origin>/<path>.");
+  res.send("Proxy is running. Use /browse/<encoded_url>. All traffic flows through /browse/<origin>/<path>.");
 });
 
 const port = process.env.PORT || 10000;
