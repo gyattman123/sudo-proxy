@@ -1,3 +1,11 @@
+// server.js
+// Generic robust proxy with uniform /browse/<origin>/<path> routing.
+// Features:
+// - All links rewritten into /browse/<origin>/<path>
+// - Exhaustive MIME coverage + nosniff-safe fallbacks
+// - Cookie preservation
+// - Debug logging
+
 import express from "express";
 import fetch from "node-fetch";
 
@@ -16,8 +24,10 @@ const BLOCKED_HEADERS = [
 const MIME_BY_EXT = (path) => {
   const p = path.toLowerCase();
   if (p.endsWith(".js")) return "application/javascript";
+  if (p.endsWith(".mjs") || p.endsWith(".cjs") || p.endsWith(".jsx")) return "application/javascript";
+  if (p.endsWith(".ts") || p.endsWith(".tsx")) return "application/typescript";
   if (p.endsWith(".css")) return "text/css";
-  if (p.endsWith(".html")) return "text/html";
+  if (p.endsWith(".html") || p.endsWith(".htm")) return "text/html";
   if (p.endsWith(".json")) return "application/json";
   if (p.endsWith(".map")) return "application/json";
   if (p.endsWith(".png")) return "image/png";
@@ -35,6 +45,9 @@ const MIME_BY_EXT = (path) => {
   if (p.endsWith(".wasm")) return "application/wasm";
   return null;
 };
+
+const EXECUTABLE_OR_RENDERED = [".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".css", ".map", ".wasm", ".woff", ".woff2"];
+const isExecutableOrRendered404 = (path) => EXECUTABLE_OR_RENDERED.some((ext) => path.toLowerCase().endsWith(ext));
 
 const setStrictMimeIfNeeded = (res, url, ct) => {
   if (!ct || ct === "application/octet-stream") {
@@ -74,11 +87,16 @@ app.get("/browse/*", async (req, res) => {
         (_, attr, url) => {
           if (url.startsWith("/browse/")) return `${attr}="${url}"`;
           if (/^https?:\/\//.test(url)) return `${attr}="/browse/${enc(url)}"`;
-          if (/^\/[^/]/.test(url)) return `${attr}="/browse/${enc(origin + url)}"`;
+          if (/^\/[^/]/.test(url)) return `${attr}="/browse/${enc(origin + url)}"`; // handles /login, /register, /api, /assets
           if (/^\/\/[^/]/.test(url)) return `${attr}="/browse/${enc(`https:${url}`)}"`;
           return `${attr}="/browse/${enc(origin + "/" + url)}"`;
         }
       );
+
+      // Rewrite fetch/xhr calls
+      html = html
+        .replace(/fetch\(\s*["']\/(?!\/)/gi, `fetch("/browse/${enc(origin)}/`)
+        .replace(/(xhr\.open\(\s*["'](GET|POST|PUT|PATCH|DELETE)["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`);
 
       return res.status(upstream.status).send(html);
     }
@@ -90,6 +108,12 @@ app.get("/browse/*", async (req, res) => {
 
     const buffer = Buffer.from(await upstream.arrayBuffer());
     setStrictMimeIfNeeded(res, target, ct);
+
+    if (upstream.status === 404 && isExecutableOrRendered404(target)) {
+      res.setHeader("Content-Type", MIME_BY_EXT(target) || "application/octet-stream");
+      return res.status(200).send("");
+    }
+
     return res.status(upstream.status).end(buffer);
 
   } catch (err) {
@@ -100,7 +124,7 @@ app.get("/browse/*", async (req, res) => {
 
 // Root route
 app.get("/", (_, res) => {
-  res.send("Proxy is running. Use /browse/<encoded_url>.");
+  res.send("Proxy is running. Use /browse/<encoded_url>. All files route through /browse/<origin>/<path>.");
 });
 
 const port = process.env.PORT || 10000;
