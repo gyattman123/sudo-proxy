@@ -121,24 +121,12 @@ app.get("/browse/*", async (req, res) => {
         ...(req.headers.cookie ? { Cookie: req.headers.cookie } : {})
       }
     });
-
-    // Handle upstream 3xx redirects
-    if (upstream.status >= 300 && upstream.status < 400) {
-      const loc = upstream.headers.get("location");
-      if (loc) {
-        return res.redirect(302, `/browse/${enc(new URL(loc, target).href)}`);
-      }
-    }
-
     const ct = upstream.headers.get("content-type") || "";
     upstream.headers.forEach((v,k)=>{ if (!BLOCKED_HEADERS.includes(k.toLowerCase())) res.setHeader(k,v); });
     const origin = new URL(target).origin;
     res.cookie?.("ctx_origin", origin, { httpOnly:false, sameSite:"Lax", path:"/" });
-
     if (ct.includes("text/html")) {
       let html = await upstream.text();
-
-      // Rewrite attributes
       html = html.replace(/(href|src|action)=["']([^"']+)["']/gi,(_,attr,url)=>{
         if (url.startsWith("/browse/")) return `${attr}="${url}"`;
         if (/^https?:\/\/discord\.com/i.test(url)) return `${attr}="/browse/${enc(url)}"`;
@@ -147,22 +135,35 @@ app.get("/browse/*", async (req, res) => {
         if (/^\//.test(url)) return `${attr}="/browse/${enc(origin+url)}"`;
         return `${attr}="/browse/${enc(origin+"/"+url)}"`;
       });
-
-      // Meta refresh redirects
-      html = html.replace(/<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)["'][^>]*>/gi,
-        (_, url) => `<meta http-equiv="refresh" content="0; url=/browse/${enc(url)}">`);
-
-      // JS absolute redirects
-      html = html.replace(/window\.location\.href\s*=\s*["']https:\/\/([^"']+)["']/gi,
-        (_, path) => `window.location.href="/browse/${enc("https://"+path)}"`);
-
-      // Fetch/xhr rewrites
       html = html
         .replace(/fetch\(\s*["']\/(?!\/)/gi, `fetch("/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["'](GET|POST|PUT|PATCH|DELETE)["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`);
-
       if (!/\sbase\s/i.test(html)) {
         html = html.replace(/<head[^>]*>/i, m => `${m}\n<base href="/browse/${enc(origin)}/">`);
       }
       html = html.replace(/<\/head>/i, m => `${navPatch(origin)}\n${m}`);
       return res.status(upstream.status).send(html);
+    }
+    if (ct.includes("application/json")) {
+      return res.status(upstream.status).send(await upstream.text());
+    }
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    setStrictMimeIfNeeded(res, target, ct);
+    if (upstream.status === 404 && isExecutableOrRendered404(target)) {
+      res.setHeader("Content-Type", MIME_BY_EXT(target) || "application/javascript");
+      return res.status(200).send("");
+    }
+    return res.status(upstream.status).end(buffer);
+  } catch(err) {
+    console.error("Proxy error:", err);
+    return res.status(500).send("Proxy error: "+err.message);
+  }
+});
+
+app.get("/", (_, res) => {
+  res.send("Proxy running. Use /browse/<encoded_url>. Root-relative requests are redirected using ctx_origin.");
+});
+
+const port = process.env.PORT || 10000;
+app.listen(port, () => console.log(`Proxy listening on ${port}`));
+``
