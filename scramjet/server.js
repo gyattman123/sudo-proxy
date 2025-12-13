@@ -6,9 +6,14 @@ const app = express();
 const enc = (url) => encodeURIComponent(url);
 
 const BLOCKED_HEADERS = [
-  "content-encoding","content-length","transfer-encoding",
-  "content-security-policy","x-frame-options","strict-transport-security"
+  "content-encoding",
+  "transfer-encoding",
+  "content-length",
+  "content-security-policy",
+  "x-frame-options",
+  "strict-transport-security"
 ];
+// Note: we do NOT block set-cookie, so login flows work
 
 const MIME_BY_EXT = (path) => {
   const p = path.toLowerCase();
@@ -44,7 +49,15 @@ app.get("/browse/*", async (req, res) => {
   const target = decodeURIComponent(req.params[0]);
   console.log("Proxying:", target);
   try {
-    const upstream = await fetch(target, { redirect: "manual" });
+    const upstream = await fetch(target, {
+      redirect: "manual",
+      headers: {
+        "User-Agent": req.headers["user-agent"] || "Mozilla/5.0",
+        ...(req.headers.origin ? { Origin: req.headers.origin } : {}),
+        ...(req.headers.referer ? { Referer: req.headers.referer } : {}),
+        ...(req.headers.cookie ? { Cookie: req.headers.cookie } : {})
+      }
+    });
 
     // Handle upstream 3xx redirects
     if (upstream.status >= 300 && upstream.status < 400) {
