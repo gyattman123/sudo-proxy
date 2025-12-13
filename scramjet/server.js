@@ -1,10 +1,5 @@
 // server.js
-// Fully patched generic proxy with uniform routing and context-aware redirects.
-// - All traffic flows through /browse/<origin>/<path>
-// - Correct MIME enforcement (nosniff-safe)
-// - 404 fallbacks for executable assets
-// - HTML rewrite for href/src/action/fetch/xhr
-// - Context cookie to catch root-relative requests like /w/assets/... and redirect into /browse/<origin>/...
+// Hardened proxy with uniform routing, MIME enforcement, and generalized navigation rewrite.
 
 import express from "express";
 import fetch from "node-fetch";
@@ -12,7 +7,7 @@ import fetch from "node-fetch";
 const app = express();
 const enc = (url) => encodeURIComponent(url);
 
-// Minimal cookie parser
+// Simple cookie parser
 const parseCookies = (cookieHeader = "") =>
   cookieHeader.split(";").map(v => v.trim()).filter(Boolean).reduce((acc, pair) => {
     const eq = pair.indexOf("=");
@@ -33,10 +28,9 @@ const MIME_BY_EXT = (path) => {
   const p = path.toLowerCase();
   if (p.endsWith(".js") || p.endsWith(".mjs") || p.endsWith(".cjs") || p.endsWith(".jsx")) return "application/javascript";
   if (p.endsWith(".ts") || p.endsWith(".tsx")) return "application/typescript";
-  if (p.endsWith(".css") || p.endsWith(".less") || p.endsWith(".sass") || p.endsWith(".scss")) return "text/css";
+  if (p.endsWith(".css")) return "text/css";
   if (p.endsWith(".html") || p.endsWith(".htm")) return "text/html";
-  if (p.endsWith(".json") || p.endsWith(".webmanifest") || p.endsWith(".manifest")) return "application/json";
-  if (p.endsWith(".map")) return "application/json";
+  if (p.endsWith(".json") || p.endsWith(".map")) return "application/json";
   if (p.endsWith(".png")) return "image/png";
   if (p.endsWith(".jpg") || p.endsWith(".jpeg")) return "image/jpeg";
   if (p.endsWith(".gif")) return "image/gif";
@@ -47,8 +41,6 @@ const MIME_BY_EXT = (path) => {
   if (p.endsWith(".woff")) return "font/woff";
   if (p.endsWith(".ttf")) return "font/ttf";
   if (p.endsWith(".otf")) return "font/otf";
-  if (p.endsWith(".mp3")) return "audio/mpeg";
-  if (p.endsWith(".wav")) return "audio/wav";
   if (p.endsWith(".mp4")) return "video/mp4";
   if (p.endsWith(".webm")) return "video/webm";
   if (p.endsWith(".pdf")) return "application/pdf";
@@ -67,7 +59,7 @@ const setStrictMimeIfNeeded = (res, url, ct) => {
   if (url.toLowerCase().endsWith(".wasm")) res.setHeader("Content-Type", "application/wasm");
 };
 
-// Context-aware catch-all: redirect any non-/browse request using ctx_origin cookie
+// Catch-all: redirect stray root-relative requests using ctx_origin cookie
 app.use((req, res, next) => {
   const path = req.path || "/";
   if (path === "/" || path.startsWith("/browse/")) return next();
@@ -109,33 +101,30 @@ app.get("/browse/*", async (req, res) => {
     if (ct.includes("text/html")) {
       let html = await upstream.text();
 
-      // Attribute rewrites
+      // Rewrite attributes
       html = html.replace(
         /(href|src|action)=["']([^"']+)["']/gi,
         (_, attr, url) => {
-          // Already proxied
           if (url.startsWith("/browse/")) return `${attr}="${url}"`;
-
-          // Absolute URLs
           if (/^https?:\/\//i.test(url)) return `${attr}="/browse/${enc(url)}"`;
-
-          // Protocol-relative
           if (/^\/\/[^/]/.test(url)) return `${attr}="/browse/${enc(`https:${url}`)}"`;
-
-          // Root-relative (/w/assets, /a/assets, /assets, /api, /login, etc.)
           if (/^\/[^/]/.test(url)) return `${attr}="/browse/${enc(origin + url)}"`;
-
-          // Relative paths
           return `${attr}="/browse/${enc(origin + "/" + url)}"`;
         }
       );
 
-      // JS API rewrites (fetch/xhr)
+      // Rewrite JS-based navigation (any root-relative path)
+      html = html.replace(
+        /window\.location\.href\s*=\s*["']\/([^"']+)["']/gi,
+        (m, path) => `window.location.href="/browse/${enc(origin + "/" + path)}"`
+      );
+
+      // Rewrite fetch/xhr calls
       html = html
         .replace(/fetch\(\s*["']\/(?!\/)/gi, `fetch("/browse/${enc(origin)}/`)
         .replace(/(xhr\.open\(\s*["'](GET|POST|PUT|PATCH|DELETE)["']\s*,\s*["'])\/(?!\/)/gi, `$1/browse/${enc(origin)}/`);
 
-      // Optional: inject a base to help relative resolution (does not affect root-relative)
+      // Inject base tag for relative resolution
       if (!/[\s]base[\s]/i.test(html)) {
         const baseTag = `<base href="/browse/${enc(origin)}/">`;
         html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${baseTag}`);
@@ -144,17 +133,14 @@ app.get("/browse/*", async (req, res) => {
       return res.status(upstream.status).send(html);
     }
 
-    // JSON passthrough
     if (ct.includes("application/json")) {
       const json = await upstream.text();
       return res.status(upstream.status).send(json);
     }
 
-    // Binary/other with strict MIME
     const buffer = Buffer.from(await upstream.arrayBuffer());
     setStrictMimeIfNeeded(res, target, ct);
 
-    // 404 fallback for executable/rendered assets to avoid nosniff/script errors
     if (upstream.status === 404 && isExecutableOrRendered404(target)) {
       res.setHeader("Content-Type", MIME_BY_EXT(target) || "application/javascript");
       return res.status(200).send("");
@@ -169,7 +155,7 @@ app.get("/browse/*", async (req, res) => {
 
 // Root route
 app.get("/", (_, res) => {
-  res.send("Proxy running. Use /browse/<encoded_url>. Non-/browse requests are redirected using ctx_origin.");
+  res.send("Proxy running. Use /browse/<encoded_url>. Root-relative requests are redirected using ctx_origin.");
 });
 
 const port = process.env.PORT || 10000;
