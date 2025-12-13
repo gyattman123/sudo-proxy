@@ -101,7 +101,7 @@ app.get("/browse/*", async (req, res) => {
     if (ct.includes("text/html")) {
       let html = await upstream.text();
 
-      // Rewrite attributes
+      // Rewrite attributes (anchors, forms, scripts, etc.)
       html = html.replace(
         /(href|src|action)=["']([^"']+)["']/gi,
         (_, attr, url) => {
@@ -113,11 +113,16 @@ app.get("/browse/*", async (req, res) => {
         }
       );
 
-      // Rewrite JS-based navigation (any root-relative path)
-      html = html.replace(
-        /window\.location\.href\s*=\s*["']\/([^"']+)["']/gi,
-        (m, path) => `window.location.href="/browse/${enc(origin + "/" + path)}"`
-      );
+      // Rewrite JS-based navigation (href, assign, replace, push)
+      html = html
+        .replace(/window\.location\.href\s*=\s*["']\/([^"']+)["']/gi,
+                 (m, path) => `window.location.href="/browse/${enc(origin + "/" + path)}"`)
+        .replace(/location\.assign\s*\(\s*["']\/([^"']+)["']\s*\)/gi,
+                 (m, path) => `location.assign("/browse/${enc(origin + "/" + path)}")`)
+        .replace(/location\.replace\s*\(\s*["']\/([^"']+)["']\s*\)/gi,
+                 (m, path) => `location.replace("/browse/${enc(origin + "/" + path)}")`)
+        .replace(/history\.push\s*\(\s*["']\/([^"']+)["']\s*\)/gi,
+                 (m, path) => `history.push("/browse/${enc(origin + "/" + path)}")`);
 
       // Rewrite fetch/xhr calls
       html = html
