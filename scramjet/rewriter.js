@@ -19,14 +19,15 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     if (/^https?:\/\//i.test(url)) return `${routePrefix}${enc(url)}`;
     if (/^\/\//.test(url)) return `${routePrefix}${enc("https:" + url)}`;
     if (/^\//.test(url)) return `${routePrefix}${enc(origin + url)}`;
-    // Fix: relative paths like "w/assets/..." now resolve against origin
     return `${routePrefix}${enc(origin + "/" + url)}`;
   };
 
   // Rewrite attributes (href, src, action)
   html = html.replace(/(href|src|action)=["']([^"']+)["']/gi, (_, attr, url) => {
     if (shouldSkip(url)) return `${attr}="${url}"`;
-    return `${attr}="${toProxy(url)}"`;
+    const rewritten = toProxy(url);
+    console.log(`[rewrite] ${attr}: ${url} → ${rewritten}`);
+    return `${attr}="${rewritten}"`;
   });
 
   // Form handling
