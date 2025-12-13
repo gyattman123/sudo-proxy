@@ -60,12 +60,20 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     return `url("${rewritten}")`;
   });
 
-  // Inline JS asset references (e.g. "/w/assets/671.js")
+  // Inline JS asset references
   html = html.replace(/["'](\/[^"']+\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|gif|svg))["']/gi,
     (_, path) => {
       const rewritten = toProxy(path);
       console.log(`[rewrite] inline asset: ${path} → ${rewritten}`);
       return `"${rewritten}"`;
+    });
+
+  // Dynamic script injection (e.g. script.src = "/w/assets/...")
+  html = html.replace(/\.src\s*=\s*["'](\/[^"']+\.(js|css|woff2?|ttf|otf))["']/gi,
+    (_, path) => {
+      const rewritten = toProxy(path);
+      console.log(`[rewrite] dynamic src: ${path} → ${rewritten}`);
+      return `.src="${rewritten}"`;
     });
 
   // Inject <base> if missing
