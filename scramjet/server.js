@@ -166,6 +166,3 @@ app.get("/browse/*", async (req, res) => {
       }
       html = html.replace(/<\/head>/i, m => `${navPatch(origin)}\n${m}`);
       return res.status(upstream.status).send(html);
-    }
-
-    if
