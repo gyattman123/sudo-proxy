@@ -1,3 +1,6 @@
+// server.js
+// Hardened proxy with uniform routing, MIME enforcement, and full navigation rewrite coverage.
+
 import express from "express";
 import fetch from "node-fetch";
 
@@ -103,6 +106,7 @@ app.get("/browse/*", async (req, res) => {
         /(href|src|action)=["']([^"']+)["']/gi,
         (_, attr, url) => {
           if (url.startsWith("/browse/")) return `${attr}="${url}"`;
+          if (/^https?:\/\/discord\.com/i.test(url)) return `${attr}="/browse/${enc(url)}"`;
           if (/^https?:\/\//i.test(url)) return `${attr}="/browse/${enc(url)}"`;
           if (/^\/\/[^/]/.test(url)) return `${attr}="/browse/${enc(`https:${url}`)}"`;
           if (/^\/[^/]/.test(url)) return `${attr}="/browse/${enc(origin + url)}"`;
@@ -110,16 +114,26 @@ app.get("/browse/*", async (req, res) => {
         }
       );
 
-      // Rewrite JS-based navigation (href, assign, replace, push)
+      // Rewrite JS-based navigation (href, assign, replace, push, document.location, window.open)
       html = html
         .replace(/window\.location\.href\s*=\s*["']\/([^"']+)["']/gi,
                  (m, path) => `window.location.href="/browse/${enc(origin + "/" + path)}"`)
+        .replace(/document\.location\s*=\s*["']\/([^"']+)["']/gi,
+                 (m, path) => `document.location="/browse/${enc(origin + "/" + path)}"`)
         .replace(/location\.assign\s*\(\s*["']\/([^"']+)["']\s*\)/gi,
                  (m, path) => `location.assign("/browse/${enc(origin + "/" + path)}")`)
         .replace(/location\.replace\s*\(\s*["']\/([^"']+)["']\s*\)/gi,
                  (m, path) => `location.replace("/browse/${enc(origin + "/" + path)}")`)
         .replace(/history\.push\s*\(\s*["']\/([^"']+)["']\s*\)/gi,
-                 (m, path) => `history.push("/browse/${enc(origin + "/" + path)}")`);
+                 (m, path) => `history.push("/browse/${enc(origin + "/" + path)}")`)
+        .replace(/history\.replace\s*\(\s*["']\/([^"']+)["']\s*\)/gi,
+                 (m, path) => `history.replace("/browse/${enc(origin + "/" + path)}")`)
+        .replace(/window\.open\s*\(\s*["']\/([^"']+)["']/gi,
+                 (m, path) => `window.open("/browse/${enc(origin + "/" + path)}"`);
+
+      // Rewrite absolute discord.com JS navigations
+      html = html.replace(/["']https:\/\/discord\.com\/([^"']+)["']/gi,
+        (m, path) => `"/browse/${enc("https://discord.com/" + path)}"`);
 
       // Rewrite fetch/xhr calls
       html = html
@@ -148,17 +162,4 @@ app.get("/browse/*", async (req, res) => {
       return res.status(200).send("");
     }
 
-    return res.status(upstream.status).end(buffer);
-  } catch (err) {
-    console.error("Proxy error:", err);
-    return res.status(500).send("Proxy error: " + err.message);
-  }
-});
-
-// Root route
-app.get("/", (_, res) => {
-  res.send("Proxy running. Use /browse/<encoded_url>. Root-relative requests are redirected using ctx_origin.");
-});
-
-const port = process.env.PORT || 10000;
-app.listen(port, () => console.log(`Proxy listening on ${port}`));
+    return
