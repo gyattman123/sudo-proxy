@@ -1,13 +1,10 @@
-// server.js
-// Hardened proxy with uniform routing, MIME enforcement, and generalized navigation rewrite.
-
 import express from "express";
 import fetch from "node-fetch";
 
 const app = express();
 const enc = (url) => encodeURIComponent(url);
 
-// Simple cookie parser
+// Cookie parser
 const parseCookies = (cookieHeader = "") =>
   cookieHeader.split(";").map(v => v.trim()).filter(Boolean).reduce((acc, pair) => {
     const eq = pair.indexOf("=");
