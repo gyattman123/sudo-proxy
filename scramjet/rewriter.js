@@ -19,6 +19,7 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     if (/^https?:\/\//i.test(url)) return `${routePrefix}${enc(url)}`;
     if (/^\/\//.test(url)) return `${routePrefix}${enc("https:" + url)}`;
     if (/^\//.test(url)) return `${routePrefix}${enc(origin + url)}`;
+    // Fix: relative paths like "w/assets/..." now resolve against origin
     return `${routePrefix}${enc(origin + "/" + url)}`;
   };
 
