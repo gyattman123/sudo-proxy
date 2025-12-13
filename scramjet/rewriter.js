@@ -55,8 +55,18 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
   // CSS url(...)
   html = html.replace(/url\(["']?([^"')]+)["']?\)/gi, (_, url) => {
     if (shouldSkip(url)) return `url("${url}")`;
-    return `url("${toProxy(url)}")`;
+    const rewritten = toProxy(url);
+    console.log(`[rewrite] CSS url: ${url} → ${rewritten}`);
+    return `url("${rewritten}")`;
   });
+
+  // Inline JS asset references (e.g. "/w/assets/671.js")
+  html = html.replace(/["'](\/[^"']+\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|gif|svg))["']/gi,
+    (_, path) => {
+      const rewritten = toProxy(path);
+      console.log(`[rewrite] inline asset: ${path} → ${rewritten}`);
+      return `"${rewritten}"`;
+    });
 
   // Inject <base> if missing
   if (!/\sbase\s/i.test(html)) {
