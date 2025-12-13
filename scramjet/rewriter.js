@@ -1,36 +1,78 @@
 export function rewriteHtml(html, origin, routePrefix = "/browse/") {
   const enc = encodeURIComponent;
 
+  const shouldSkip = (url) => {
+    if (!url) return true;
+    const lower = url.toLowerCase();
+    return (
+      lower.startsWith("#") ||
+      lower.startsWith("javascript:") ||
+      lower.startsWith("mailto:") ||
+      lower.startsWith("tel:") ||
+      lower.startsWith("data:")
+    );
+  };
+
+  const toProxy = (url) => {
+    if (!url) return url;
+    if (url.startsWith(routePrefix)) return url;
+    if (/^https?:\/\//i.test(url)) return `${routePrefix}${enc(url)}`;
+    if (/^\/\//.test(url)) return `${routePrefix}${enc("https:" + url)}`;
+    if (/^\//.test(url)) return `${routePrefix}${enc(origin + url)}`;
+    return `${routePrefix}${enc(origin + "/" + url)}`;
+  };
+
   // Rewrite attributes (href, src, action)
   html = html.replace(/(href|src|action)=["']([^"']+)["']/gi, (_, attr, url) => {
-    if (url.startsWith(routePrefix)) return `${attr}="${url}"`;
-    if (/^https?:\/\//i.test(url)) return `${attr}="${routePrefix}${enc(url)}"`;
-    if (/^\/\//.test(url)) return `${attr}="${routePrefix}${enc("https:" + url)}"`;
-    if (/^\//.test(url)) return `${attr}="${routePrefix}${enc(origin + url)}"`;
-    return `${attr}="${routePrefix}${enc(origin + "/" + url)}"`;
+    if (shouldSkip(url)) return `${attr}="${url}"`;
+    return `${attr}="${toProxy(url)}"`;
+  });
+
+  // Form method defaulting and empty actions
+  html = html.replace(/<form([^>]*)>/gi, (m, attrs) => {
+    const hasAction = /action=/i.test(attrs);
+    const hasMethod = /method=/i.test(attrs);
+    let newAttrs = attrs;
+
+    if (!hasAction) {
+      // Empty action should point to current origin through proxy
+      newAttrs += ` action="${routePrefix}${enc(origin)}"`;
+    }
+    if (!hasMethod) {
+      newAttrs += ` method="GET"`;
+    }
+    return `<form${newAttrs}>`;
   });
 
   // Meta refresh redirects
   html = html.replace(
     /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)["'][^>]*>/gi,
-    (_, url) => `<meta http-equiv="refresh" content="0; url=${routePrefix}${enc(url)}">`
+    (_, url) => {
+      if (shouldSkip(url)) return _;
+      return `<meta http-equiv="refresh" content="0; url=${toProxy(url)}">`;
+    }
   );
 
-  // JS absolute redirects
+  // JS redirects (common cases)
   html = html.replace(
-    /window\.location\.href\s*=\s*["']https:\/\/([^"']+)["']/gi,
-    (_, path) => `window.location.href="${routePrefix}${enc("https://" + path)}"`
+    /\bwindow\.location(?:\.href|\s*=)\s*=\s*["']([^"']+)["']/gi,
+    (_, url) => {
+      if (shouldSkip(url)) return _;
+      return `window.location.href="${toProxy(url)}"`;
+    }
+  );
+  html = html.replace(
+    /\blocation\.assign\(\s*["']([^"']+)["']\s*\)/gi,
+    (_, url) => {
+      if (shouldSkip(url)) return _;
+      return `location.assign("${toProxy(url)}")`;
+    }
   );
 
   // CSS url(...) references
   html = html.replace(/url\(["']?([^"')]+)["']?\)/gi, (_, url) => {
-    if (/^https?:\/\//i.test(url)) {
-      return `url("${routePrefix}${enc(url)}")`;
-    }
-    if (/^\//.test(url)) {
-      return `url("${routePrefix}${enc(origin + url)}")`;
-    }
-    return `url("${routePrefix}${enc(origin + "/" + url)}")`;
+    if (shouldSkip(url)) return `url("${url}")`;
+    return `url("${toProxy(url)}")`;
   });
 
   // Inject <base> if missing
@@ -44,7 +86,6 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
   return html;
 }
 
-// Runtime navigation patch script
 function navPatch(origin, routePrefix) {
   return `
 <script>
@@ -52,14 +93,50 @@ function navPatch(origin, routePrefix) {
   const ORIGIN = ${JSON.stringify(origin)};
   const PREFIX = ${JSON.stringify(routePrefix)};
   const enc = encodeURIComponent;
+
+  const shouldSkip = (u) => {
+    if (!u) return true;
+    const lower = String(u).toLowerCase();
+    return lower.startsWith("#") || lower.startsWith("javascript:") ||
+           lower.startsWith("mailto:") || lower.startsWith("tel:") || lower.startsWith("data:");
+  };
   const wrap = (u) => {
-    if (!u) return u;
+    if (!u || shouldSkip(u)) return u;
+    if (String(u).startsWith(PREFIX)) return u;
     if (/^https?:\\/\\//i.test(u)) return PREFIX + enc(u);
     if (/^\\/\\//.test(u)) return PREFIX + enc("https:" + u);
     if (/^\\//.test(u)) return PREFIX + enc(ORIGIN + u);
-    if (u.startsWith(PREFIX)) return u;
     return PREFIX + enc(ORIGIN + "/" + u);
   };
+
+  // Only intercept when we actually change the URL
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest("a[href]");
+    if (!a) return;
+    const href = a.getAttribute("href");
+    const proxied = wrap(href);
+    if (proxied && proxied !== href) {
+      e.preventDefault();
+      window.location.assign(proxied);
+    }
+  }, true);
+
+  document.addEventListener("submit", (e) => {
+    const f = e.target;
+    // Let site JS handle complex login flows if action is script-driven
+    const action = f.getAttribute("action") || "";
+    const proxied = wrap(action || ORIGIN);
+    if (proxied && proxied !== action) {
+      // Only reroute GET forms automatically; POST bodies may be custom-handled by site JS
+      const method = (f.getAttribute("method") || "GET").toUpperCase();
+      if (method === "GET") {
+        e.preventDefault();
+        window.location.assign(proxied);
+      }
+    }
+  }, true);
+
+  // History and location overrides
   const _push = history.pushState, _replace = history.replaceState;
   history.pushState = function(s,t,u){ return _push.call(this,s,t,wrap(u)); };
   history.replaceState = function(s,t,u){ return _replace.call(this,s,t,wrap(u)); };
