@@ -28,48 +28,29 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     return `${attr}="${toProxy(url)}"`;
   });
 
-  // Form method defaulting and empty actions
+  // Form handling
   html = html.replace(/<form([^>]*)>/gi, (m, attrs) => {
     const hasAction = /action=/i.test(attrs);
     const hasMethod = /method=/i.test(attrs);
     let newAttrs = attrs;
-
-    if (!hasAction) {
-      // Empty action should point to current origin through proxy
-      newAttrs += ` action="${routePrefix}${enc(origin)}"`;
-    }
-    if (!hasMethod) {
-      newAttrs += ` method="GET"`;
-    }
+    if (!hasAction) newAttrs += ` action="${routePrefix}${enc(origin)}"`;
+    if (!hasMethod) newAttrs += ` method="GET"`;
     return `<form${newAttrs}>`;
   });
 
-  // Meta refresh redirects
+  // Meta refresh
   html = html.replace(
     /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)["'][^>]*>/gi,
-    (_, url) => {
-      if (shouldSkip(url)) return _;
-      return `<meta http-equiv="refresh" content="0; url=${toProxy(url)}">`;
-    }
+    (_, url) => shouldSkip(url) ? _ : `<meta http-equiv="refresh" content="0; url=${toProxy(url)}">`
   );
 
-  // JS redirects (common cases)
-  html = html.replace(
-    /\bwindow\.location(?:\.href|\s*=)\s*=\s*["']([^"']+)["']/gi,
-    (_, url) => {
-      if (shouldSkip(url)) return _;
-      return `window.location.href="${toProxy(url)}"`;
-    }
-  );
-  html = html.replace(
-    /\blocation\.assign\(\s*["']([^"']+)["']\s*\)/gi,
-    (_, url) => {
-      if (shouldSkip(url)) return _;
-      return `location.assign("${toProxy(url)}")`;
-    }
-  );
+  // JS redirects
+  html = html.replace(/\bwindow\.location(?:\.href|\s*=)\s*=\s*["']([^"']+)["']/gi,
+    (_, url) => shouldSkip(url) ? _ : `window.location.href="${toProxy(url)}"`);
+  html = html.replace(/\blocation\.assign\(\s*["']([^"']+)["']\s*\)/gi,
+    (_, url) => shouldSkip(url) ? _ : `location.assign("${toProxy(url)}")`);
 
-  // CSS url(...) references
+  // CSS url(...)
   html = html.replace(/url\(["']?([^"')]+)["']?\)/gi, (_, url) => {
     if (shouldSkip(url)) return `url("${url}")`;
     return `url("${toProxy(url)}")`;
@@ -80,7 +61,7 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     html = html.replace(/<head[^>]*>/i, m => `${m}\n<base href="${routePrefix}${enc(origin)}/">`);
   }
 
-  // Inject runtime navigation patch
+  // Inject runtime patch
   html = html.replace(/<\/head>/i, m => `${navPatch(origin, routePrefix)}\n${m}`);
 
   return html;
@@ -109,7 +90,6 @@ function navPatch(origin, routePrefix) {
     return PREFIX + enc(ORIGIN + "/" + u);
   };
 
-  // Only intercept when we actually change the URL
   document.addEventListener("click", (e) => {
     const a = e.target.closest("a[href]");
     if (!a) return;
@@ -123,11 +103,9 @@ function navPatch(origin, routePrefix) {
 
   document.addEventListener("submit", (e) => {
     const f = e.target;
-    // Let site JS handle complex login flows if action is script-driven
     const action = f.getAttribute("action") || "";
     const proxied = wrap(action || ORIGIN);
     if (proxied && proxied !== action) {
-      // Only reroute GET forms automatically; POST bodies may be custom-handled by site JS
       const method = (f.getAttribute("method") || "GET").toUpperCase();
       if (method === "GET") {
         e.preventDefault();
@@ -136,7 +114,6 @@ function navPatch(origin, routePrefix) {
     }
   }, true);
 
-  // History and location overrides
   const _push = history.pushState, _replace = history.replaceState;
   history.pushState = function(s,t,u){ return _push.call(this,s,t,wrap(u)); };
   history.replaceState = function(s,t,u){ return _replace.call(this,s,t,wrap(u)); };
