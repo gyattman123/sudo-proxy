@@ -68,13 +68,21 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
       return `"${rewritten}"`;
     });
 
-  // Dynamic script injection (e.g. script.src = "/w/assets/...")
+  // Dynamic script injection
   html = html.replace(/\.src\s*=\s*["'](\/[^"']+\.(js|css|woff2?|ttf|otf))["']/gi,
     (_, path) => {
       const rewritten = toProxy(path);
       console.log(`[rewrite] dynamic src: ${path} → ${rewritten}`);
       return `.src="${rewritten}"`;
     });
+
+  // General fallback: rewrite any root-relative path (e.g. "/resources/balls/scrotum.png")
+  html = html.replace(/(["'(])\/([^"'()\s]+)/gi, (_, prefix, rest) => {
+    const full = `${origin}/${rest}`;
+    const rewritten = `${prefix}${toProxy(full)}`;
+    console.log(`[rewrite] fallback: /${rest} → ${rewritten}`);
+    return rewritten;
+  });
 
   // Inject <base> if missing
   if (!/\sbase\s/i.test(html)) {
