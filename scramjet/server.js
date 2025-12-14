@@ -5,8 +5,8 @@ import path from "path";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configure upstream origin (e.g. "https://discord.com")
-const UPSTREAM_ORIGIN = process.env.UPSTREAM_ORIGIN || "https://discord.com";
+// Generic upstream origin (e.g. "https://discord.com")
+const UPSTREAM_ORIGIN = process.env.UPSTREAM_ORIGIN || "https://example.com";
 
 // MIME map
 const MIME_BY_EXT = {
@@ -39,8 +39,8 @@ function setStrictMime(res, targetUrl, upstreamCT) {
   }
 }
 
-// Catch-all: any root-relative path → /browse/<encoded absolute URL>
-app.use(/^\/(?!browse).+/, (req, res) => {
+// Catch-all: rewrite any root-relative path to /browse/<encoded absolute URL>
+app.use(/^\/(?!browse)([^?]*)/, (req, res) => {
   const fullUrl = UPSTREAM_ORIGIN + req.originalUrl;
   res.redirect("/browse/" + encodeURIComponent(fullUrl));
 });
@@ -53,16 +53,16 @@ app.get("/browse/:encoded", async (req, res) => {
       headers: { "User-Agent": "Mozilla/5.0 Proxy" }
     });
 
-    // Handle upstream errors gracefully
+    // Graceful fallback for upstream errors
     if (!upstream.ok) {
       const ext = path.extname(new URL(target).pathname).toLowerCase();
       if (ext === ".js") {
         res.setHeader("Content-Type", "application/javascript");
-        return res.status(200).send("// empty fallback JS");
+        return res.status(200).send("// fallback JS");
       }
       if (ext === ".css") {
         res.setHeader("Content-Type", "text/css");
-        return res.status(200).send("/* empty fallback CSS */");
+        return res.status(200).send("/* fallback CSS */");
       }
       return res.status(upstream.status).send("");
     }
