@@ -5,7 +5,7 @@ import path from "path";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// MIME map
+// MIME map for strict enforcement
 const MIME_BY_EXT = {
   ".js": "application/javascript",
   ".css": "text/css",
@@ -36,12 +36,12 @@ function setStrictMime(res, targetUrl, upstreamCT) {
   }
 }
 
-// Reject raw root-relative requests — they must be rewritten by rewriter.js
+// 🚫 Reject raw root-relative requests — they must be rewritten by rewriter.js
 app.use(/^\/(?!browse).+/, (req, res) => {
-  res.status(400).send("Root-relative request must be rewritten to /browse/<encoded>");
+  res.status(400).send("Unrewritten path — must be routed through /browse/<encoded>");
 });
 
-// Proxy handler
+// ✅ Proxy handler — only acts on fully encoded URLs
 app.get("/browse/:encoded", async (req, res) => {
   try {
     const target = decodeURIComponent(req.params.encoded);
@@ -74,5 +74,5 @@ app.get("/browse/:encoded", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Generic proxy running on http://localhost:${PORT}`);
+  console.log(`✅ Generic proxy running on http://localhost:${PORT}`);
 });
