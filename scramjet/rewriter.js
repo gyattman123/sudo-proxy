@@ -1,5 +1,5 @@
 export function rewriteHtml(html, origin, routePrefix = "/browse/") {
-  const enc = encodeURIComponent;
+  const encOnce = (url) => encodeURIComponent(decodeURIComponent(url));
 
   const shouldSkip = (url) => {
     if (!url) return true;
@@ -16,17 +16,16 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
   const toProxy = (url) => {
     if (!url) return url;
     if (url.startsWith(routePrefix)) return url;
-    if (/^https?:\/\//i.test(url)) return `${routePrefix}${enc(url)}`;
-    if (/^\/\//.test(url)) return `${routePrefix}${enc("https:" + url)}`;
-    if (/^\//.test(url)) return `${routePrefix}${enc(origin + url)}`;
-    return `${routePrefix}${enc(origin + "/" + url)}`;
+    if (/^https?:\/\//i.test(url)) return `${routePrefix}${encOnce(url)}`;
+    if (/^\/\//.test(url)) return `${routePrefix}${encOnce("https:" + url)}`;
+    if (/^\//.test(url)) return `${routePrefix}${encOnce(origin + url)}`;
+    return `${routePrefix}${encOnce(origin + "/" + url)}`;
   };
 
   // Rewrite attributes (href, src, action)
   html = html.replace(/(href|src|action)=["']([^"']+)["']/gi, (_, attr, url) => {
     if (shouldSkip(url)) return `${attr}="${url}"`;
     const rewritten = toProxy(url);
-    console.log(`[rewrite] ${attr}: ${url} → ${rewritten}`);
     return `${attr}="${rewritten}"`;
   });
 
@@ -35,7 +34,7 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     const hasAction = /action=/i.test(attrs);
     const hasMethod = /method=/i.test(attrs);
     let newAttrs = attrs;
-    if (!hasAction) newAttrs += ` action="${routePrefix}${enc(origin)}"`;
+    if (!hasAction) newAttrs += ` action="${routePrefix}${encOnce(origin)}"`;
     if (!hasMethod) newAttrs += ` method="GET"`;
     return `<form${newAttrs}>`;
   });
@@ -55,38 +54,26 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
   // CSS url(...)
   html = html.replace(/url\(["']?([^"')]+)["']?\)/gi, (_, url) => {
     if (shouldSkip(url)) return `url("${url}")`;
-    const rewritten = toProxy(url);
-    console.log(`[rewrite] CSS url: ${url} → ${rewritten}`);
-    return `url("${rewritten}")`;
+    return `url("${toProxy(url)}")`;
   });
 
   // Inline JS asset references
-  html = html.replace(/["'](\/[^"']+\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|gif|svg))["']/gi,
-    (_, path) => {
-      const rewritten = toProxy(path);
-      console.log(`[rewrite] inline asset: ${path} → ${rewritten}`);
-      return `"${rewritten}"`;
-    });
+  html = html.replace(/["'](\/[^"']+\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|gif|svg|mp4))["']/gi,
+    (_, path) => `"${toProxy(path)}"`);
 
   // Dynamic script injection
-  html = html.replace(/\.src\s*=\s*["'](\/[^"']+\.(js|css|woff2?|ttf|otf))["']/gi,
-    (_, path) => {
-      const rewritten = toProxy(path);
-      console.log(`[rewrite] dynamic src: ${path} → ${rewritten}`);
-      return `.src="${rewritten}"`;
-    });
+  html = html.replace(/\.src\s*=\s*["'](\/[^"']+\.(js|css|woff2?|ttf|otf|mp4))["']/gi,
+    (_, path) => `.src="${toProxy(path)}"`);
 
-  // General fallback: rewrite any root-relative path (e.g. "/resources/balls/scrotum.png")
+  // General fallback: rewrite any root-relative path
   html = html.replace(/(["'(])\/([^"'()\s]+)/gi, (_, prefix, rest) => {
     const full = `${origin}/${rest}`;
-    const rewritten = `${prefix}${toProxy(full)}`;
-    console.log(`[rewrite] fallback: /${rest} → ${rewritten}`);
-    return rewritten;
+    return `${prefix}${toProxy(full)}`;
   });
 
   // Inject <base> if missing
   if (!/\sbase\s/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, m => `${m}\n<base href="${routePrefix}${enc(origin)}/">`);
+    html = html.replace(/<head[^>]*>/i, m => `${m}\n<base href="${routePrefix}${encOnce(origin)}/">`);
   }
 
   // Inject runtime patch
@@ -101,7 +88,7 @@ function navPatch(origin, routePrefix) {
 (function(){
   const ORIGIN = ${JSON.stringify(origin)};
   const PREFIX = ${JSON.stringify(routePrefix)};
-  const enc = encodeURIComponent;
+  const encOnce = (u) => encodeURIComponent(decodeURIComponent(u));
 
   const shouldSkip = (u) => {
     if (!u) return true;
@@ -112,10 +99,10 @@ function navPatch(origin, routePrefix) {
   const wrap = (u) => {
     if (!u || shouldSkip(u)) return u;
     if (String(u).startsWith(PREFIX)) return u;
-    if (/^https?:\\/\\//i.test(u)) return PREFIX + enc(u);
-    if (/^\\/\\//.test(u)) return PREFIX + enc("https:" + u);
-    if (/^\\//.test(u)) return PREFIX + enc(ORIGIN + u);
-    return PREFIX + enc(ORIGIN + "/" + u);
+    if (/^https?:\\/\\//i.test(u)) return PREFIX + encOnce(u);
+    if (/^\\/\\//.test(u)) return PREFIX + encOnce("https:" + u);
+    if (/^\\//.test(u)) return PREFIX + encOnce(ORIGIN + u);
+    return PREFIX + encOnce(ORIGIN + "/" + u);
   };
 
   document.addEventListener("click", (e) => {
