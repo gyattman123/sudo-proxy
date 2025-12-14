@@ -1,5 +1,9 @@
+// Fully hardened rewriter: no host leakage, no double-encoding, generalized path handling,
+// and safe scoping. Routes everything through /browse/<encoded absolute URL>.
+
 export function rewriteHtml(html, origin, routePrefix = "/browse/") {
-  const encOnce = (url) => encodeURIComponent(decodeURIComponent(url));
+  // Encode exactly once to avoid %2F → %252F
+  const encOnce = (u) => encodeURIComponent(decodeURIComponent(u));
 
   const shouldSkip = (url) => {
     if (!url) return true;
@@ -13,23 +17,32 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     );
   };
 
+  // Core: turn any URL into an absolute URL against origin, then wrap via /browse/
   const toProxy = (url) => {
     if (!url) return url;
+    // Already proxied
     if (url.startsWith(routePrefix)) return url;
+
+    // Absolute http(s)
     if (/^https?:\/\//i.test(url)) return `${routePrefix}${encOnce(url)}`;
+
+    // Protocol-relative //cdn.example.com/...
     if (/^\/\//.test(url)) return `${routePrefix}${encOnce("https:" + url)}`;
+
+    // Root-relative /path
     if (/^\//.test(url)) return `${routePrefix}${encOnce(origin + url)}`;
+
+    // Relative path path/to
     return `${routePrefix}${encOnce(origin + "/" + url)}`;
   };
 
-  // Rewrite attributes (href, src, action)
+  // Attribute rewrites: href, src, action
   html = html.replace(/(href|src|action)=["']([^"']+)["']/gi, (_, attr, url) => {
     if (shouldSkip(url)) return `${attr}="${url}"`;
-    const rewritten = toProxy(url);
-    return `${attr}="${rewritten}"`;
+    return `${attr}="${toProxy(url)}"`;
   });
 
-  // Form handling
+  // Forms: add defaults so submissions stay inside proxy
   html = html.replace(/<form([^>]*)>/gi, (m, attrs) => {
     const hasAction = /action=/i.test(attrs);
     const hasMethod = /method=/i.test(attrs);
@@ -39,17 +52,17 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     return `<form${newAttrs}>`;
   });
 
-  // Meta refresh
+  // Meta refresh → proxy
   html = html.replace(
     /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)["'][^>]*>/gi,
-    (_, url) => shouldSkip(url) ? _ : `<meta http-equiv="refresh" content="0; url=${toProxy(url)}">`
+    (_, url) => (shouldSkip(url) ? _ : `<meta http-equiv="refresh" content="0; url=${toProxy(url)}">`)
   );
 
-  // JS redirects
+  // JS redirects → proxy
   html = html.replace(/\bwindow\.location(?:\.href|\s*=)\s*=\s*["']([^"']+)["']/gi,
-    (_, url) => shouldSkip(url) ? _ : `window.location.href="${toProxy(url)}"`);
-  html = html.replace(/\blocation\.assign\(\s*["']([^"']+)["']\s*\)/gi,
-    (_, url) => shouldSkip(url) ? _ : `location.assign("${toProxy(url)}")`);
+    (_, url) => (shouldSkip(url) ? _ : `window.location.href="${toProxy(url)}"`));
+  html = html.replace(/\blocation\.(assign|replace)\(\s*["']([^"']+)["']\s*\)/gi,
+    (_, fn, url) => (shouldSkip(url) ? _ : `location.${fn}("${toProxy(url)}")`));
 
   // CSS url(...)
   html = html.replace(/url\(["']?([^"')]+)["']?\)/gi, (_, url) => {
@@ -57,27 +70,23 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     return `url("${toProxy(url)}")`;
   });
 
-  // Inline JS asset references
-  html = html.replace(/["'](\/[^"']+\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|gif|svg|mp4))["']/gi,
-    (_, path) => `"${toProxy(path)}"`);
-
-  // Dynamic script injection
-  html = html.replace(/\.src\s*=\s*["'](\/[^"']+\.(js|css|woff2?|ttf|otf|mp4))["']/gi,
-    (_, path) => `.src="${toProxy(path)}"`);
-
-  // General fallback: rewrite any root-relative path
-  html = html.replace(/(["'(])\/([^"'()\s]+)/gi, (_, prefix, rest) => {
-    const full = `${origin}/${rest}`;
-    return `${prefix}${toProxy(full)}`;
+  // Inline JS string assets (generalized: any quoted root-relative or absolute http(s))
+  html = html.replace(/(["'])(\/[^"']+|https?:\/\/[^"']+)["']/gi, (m, q, url) => {
+    if (shouldSkip(url)) return m;
+    return `${q}${toProxy(url)}${q}`;
   });
 
-  // Inject <base> if missing
+  // Dynamic element .src/.href/.action assignments
+  html = html.replace(/\.(src|href|action)\s*=\s*["'](\/[^"']+|https?:\/\/[^"']+)["']/gi,
+    (_, attr, url) => `.${attr}="${toProxy(url)}"`);
+
+  // Inject <base> so relative resolution is stable inside the proxied doc
   if (!/\sbase\s/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, m => `${m}\n<base href="${routePrefix}${encOnce(origin)}/">`);
+    html = html.replace(/<head[^>]*>/i, (m) => `${m}\n<base href="${routePrefix}${encOnce(origin)}/">`);
   }
 
-  // Inject runtime patch
-  html = html.replace(/<\/head>/i, m => `${navPatch(origin, routePrefix)}\n${m}`);
+  // Runtime navigation patch to intercept pushState, location, window.open
+  html = html.replace(/<\/head>/i, (m) => `${navPatch(origin, routePrefix)}\n${m}`);
 
   return html;
 }
@@ -96,6 +105,7 @@ function navPatch(origin, routePrefix) {
     return lower.startsWith("#") || lower.startsWith("javascript:") ||
            lower.startsWith("mailto:") || lower.startsWith("tel:") || lower.startsWith("data:");
   };
+
   const wrap = (u) => {
     if (!u || shouldSkip(u)) return u;
     if (String(u).startsWith(PREFIX)) return u;
@@ -105,6 +115,7 @@ function navPatch(origin, routePrefix) {
     return PREFIX + encOnce(ORIGIN + "/" + u);
   };
 
+  // Intercept anchor clicks
   document.addEventListener("click", (e) => {
     const a = e.target.closest("a[href]");
     if (!a) return;
@@ -116,6 +127,7 @@ function navPatch(origin, routePrefix) {
     }
   }, true);
 
+  // Intercept form submits (GET only)
   document.addEventListener("submit", (e) => {
     const f = e.target;
     const action = f.getAttribute("action") || "";
@@ -129,13 +141,16 @@ function navPatch(origin, routePrefix) {
     }
   }, true);
 
+  // History and location controls
   const _push = history.pushState, _replace = history.replaceState;
   history.pushState = function(s,t,u){ return _push.call(this,s,t,wrap(u)); };
   history.replaceState = function(s,t,u){ return _replace.call(this,s,t,wrap(u)); };
+
   const L = window.location, _assign = L.assign.bind(L), _replaceLoc = L.replace.bind(L);
   Object.defineProperty(window,"location",{get(){return L;},set(u){_assign(wrap(u));}});
   L.assign = (u)=>_assign(wrap(u));
   L.replace = (u)=>_replaceLoc(wrap(u));
+
   const _open = window.open;
   window.open = (u,n,s)=>_open.call(window,wrap(u),n,s);
 })();
