@@ -22,7 +22,7 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     return `${routePrefix}${encOnce(origin + "/" + url)}`;
   };
 
-  // Attributes: href, src, action
+  // Attributes: href, src, action, data-src
   html = html.replace(/(href|src|action|data-src)=["']([^"']+)["']/gi, (_, attr, url) => {
     if (shouldSkip(url)) return `${attr}="${url}"`;
     return `${attr}="${toProxy(url)}"`;
@@ -37,6 +37,10 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     return `srcset="${rewritten}"`;
   });
 
+  // Preload link rewrite
+  html = html.replace(/<link[^>]+rel=["']preload["'][^>]+href=["']([^"']+)["']/gi,
+    (_, url) => `<link rel="preload" href="${toProxy(url)}">`);
+
   // Meta refresh
   html = html.replace(
     /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)["'][^>]*>/gi,
@@ -49,11 +53,9 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     return `url("${toProxy(url)}")`;
   });
 
-  // Inline quoted paths
-  html = html.replace(/(["'])(\/[^"']+|https?:\/\/[^"']+)["']/gi, (m, q, url) => {
-    if (shouldSkip(url)) return m;
-    return `${q}${toProxy(url)}${q}`;
-  });
+  // Inline JSON/config blobs (quoted paths)
+  html = html.replace(/(["'])(\/[^"']+\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|gif|svg|mp4|webp|json))(["'])/gi,
+    (_, open, path, ext, close) => `${open}${toProxy(path)}${close}`);
 
   // Inject <base> if missing
   if (!/\sbase\s/i.test(html)) {
@@ -90,7 +92,7 @@ function navPatch(origin, routePrefix) {
     return PREFIX + encOnce(ORIGIN + "/" + u);
   };
 
-  // Intercept anchor clicks
+  // Anchor clicks
   document.addEventListener("click", (e) => {
     const a = e.target.closest("a[href]");
     if (!a) return;
@@ -102,7 +104,7 @@ function navPatch(origin, routePrefix) {
     }
   }, true);
 
-  // Intercept form submits
+  // Form submits
   document.addEventListener("submit", (e) => {
     const f = e.target;
     const action = f.getAttribute("action") || "";
