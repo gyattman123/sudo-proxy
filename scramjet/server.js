@@ -5,9 +5,6 @@ import path from "path";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Upstream origin is configurable, no hardcoding
-const UPSTREAM_ORIGIN = process.env.UPSTREAM_ORIGIN || "https://example.com";
-
 // MIME map
 const MIME_BY_EXT = {
   ".js": "application/javascript",
@@ -39,10 +36,11 @@ function setStrictMime(res, targetUrl, upstreamCT) {
   }
 }
 
-// Catch-all: rewrite any root-relative path to /browse/<encoded absolute URL>
+// Catch‑all: if browser requests a root‑relative path, redirect it through /browse/<encoded>
 app.use(/^\/(?!browse).+/, (req, res) => {
-  const fullUrl = UPSTREAM_ORIGIN + req.originalUrl;
-  res.redirect("/browse/" + encodeURIComponent(fullUrl));
+  // We don’t assume any origin here — the client HTML should already have been rewritten
+  // to absolute URLs by rewriter.js. If something slips through, we just bounce it back.
+  res.status(400).send("Unrewritten root‑relative path requested");
 });
 
 // Proxy handler
@@ -53,7 +51,6 @@ app.get("/browse/:encoded", async (req, res) => {
       headers: { "User-Agent": "Mozilla/5.0 Proxy" }
     });
 
-    // Graceful fallback for upstream errors
     if (!upstream.ok) {
       const ext = path.extname(new URL(target).pathname).toLowerCase();
       if (ext === ".js") {
@@ -80,5 +77,4 @@ app.get("/browse/:encoded", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Proxy running on http://localhost:${PORT}`);
-  console.log(`Upstream origin: ${UPSTREAM_ORIGIN}`);
 });
