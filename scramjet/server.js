@@ -5,7 +5,7 @@ import path from "path";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Generic upstream origin (e.g. "https://discord.com")
+// Upstream origin is configurable, no hardcoding
 const UPSTREAM_ORIGIN = process.env.UPSTREAM_ORIGIN || "https://example.com";
 
 // MIME map
@@ -40,7 +40,7 @@ function setStrictMime(res, targetUrl, upstreamCT) {
 }
 
 // Catch-all: rewrite any root-relative path to /browse/<encoded absolute URL>
-app.use(/^\/(?!browse)([^?]*)/, (req, res) => {
+app.use(/^\/(?!browse).+/, (req, res) => {
   const fullUrl = UPSTREAM_ORIGIN + req.originalUrl;
   res.redirect("/browse/" + encodeURIComponent(fullUrl));
 });
