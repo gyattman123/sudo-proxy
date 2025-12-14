@@ -28,41 +28,55 @@ export function rewriteHtml(html, origin, routePrefix = "/browse/") {
     return `${attr}="${toProxy(url)}"`;
   });
 
-  // srcset rewrite
+  // srcset rewrite (responsive images)
   html = html.replace(/srcset=["']([^"']+)["']/gi, (_, val) => {
-    const rewritten = val.split(",").map(part => {
-      const [url, size] = part.trim().split(/\s+/);
-      return (shouldSkip(url) ? url : toProxy(url)) + (size ? " " + size : "");
-    }).join(", ");
+    const rewritten = val
+      .split(",")
+      .map((part) => {
+        const [u, size] = part.trim().split(/\s+/);
+        const proxied = shouldSkip(u) ? u : toProxy(u);
+        return size ? `${proxied} ${size}` : proxied;
+      })
+      .join(", ");
     return `srcset="${rewritten}"`;
   });
 
-  // Preload link rewrite
-  html = html.replace(/<link[^>]+rel=["']preload["'][^>]+href=["']([^"']+)["']/gi,
-    (_, url) => `<link rel="preload" href="${toProxy(url)}">`);
-
-  // Meta refresh
+  // <link rel="preload" href="...">
   html = html.replace(
-    /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)["'][^>]*>/gi,
-    (_, url) => shouldSkip(url) ? _ : `<meta http-equiv="refresh" content="0; url=${toProxy(url)}">`
+    /<link([^>]*?)rel=["']preload["']([^>]*?)href=["']([^"']+)["']([^>]*)>/gi,
+    (m, a1, a2, url, a3) => `<link${a1}rel="preload"${a2}href="${toProxy(url)}"${a3}>`
   );
 
-  // CSS url(...)
+  // <meta http-equiv="refresh" content="...;url=...">
+  html = html.replace(
+    /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=([^"']+)["'][^>]*>/gi,
+    (_, url) => (shouldSkip(url) ? _ : `<meta http-equiv="refresh" content="0; url=${toProxy(url)}">`)
+  );
+
+  // CSS url(...) inside style tags or inline styles
   html = html.replace(/url\(["']?([^"')]+)["']?\)/gi, (_, url) => {
     if (shouldSkip(url)) return `url("${url}")`;
     return `url("${toProxy(url)}")`;
   });
 
-  // Inline JSON/config blobs (quoted paths)
-  html = html.replace(/(["'])(\/[^"']+\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|gif|svg|mp4|webp|json))(["'])/gi,
-    (_, open, path, ext, close) => `${open}${toProxy(path)}${close}`);
+  // Inline JSON/config blobs — quoted root-relative or absolute URLs with common asset extensions
+  html = html.replace(
+    /(["'])(\/[^"']+\.(js|css|woff2?|ttf|otf|png|jpg|jpeg|gif|svg|mp4|webp|json)|https?:\/\/[^"']+)(["'])/gi,
+    (m, open, url, _ext, close) => {
+      if (shouldSkip(url)) return m;
+      return `${open}${toProxy(url)}${close}`;
+    }
+  );
 
-  // Inject <base> if missing
+  // Inject <base> if missing, to normalize relative resolution
   if (!/\sbase\s/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, (m) => `${m}\n<base href="${routePrefix}${encOnce(origin)}/">`);
+    html = html.replace(
+      /<head[^>]*>/i,
+      (m) => `${m}\n<base href="${routePrefix}${encOnce(origin)}/">`
+    );
   }
 
-  // Inject runtime patch
+  // Inject runtime patch for dynamic navigation and assignments
   html = html.replace(/<\/head>/i, (m) => `${navPatch(origin, routePrefix)}\n${m}`);
 
   return html;
@@ -92,7 +106,7 @@ function navPatch(origin, routePrefix) {
     return PREFIX + encOnce(ORIGIN + "/" + u);
   };
 
-  // Anchor clicks
+  // Intercept anchor clicks
   document.addEventListener("click", (e) => {
     const a = e.target.closest("a[href]");
     if (!a) return;
@@ -104,7 +118,7 @@ function navPatch(origin, routePrefix) {
     }
   }, true);
 
-  // Form submits
+  // Intercept form submits (GET only to avoid payload issues)
   document.addEventListener("submit", (e) => {
     const f = e.target;
     const action = f.getAttribute("action") || "";
@@ -118,16 +132,18 @@ function navPatch(origin, routePrefix) {
     }
   }, true);
 
-  // History + location patch
+  // Patch history state URLs
   const _push = history.pushState, _replace = history.replaceState;
   history.pushState = function(s,t,u){ return _push.call(this,s,t,wrap(u)); };
   history.replaceState = function(s,t,u){ return _replace.call(this,s,t,wrap(u)); };
 
+  // Patch window.location and navigation methods
   const L = window.location, _assign = L.assign.bind(L), _replaceLoc = L.replace.bind(L);
   Object.defineProperty(window,"location",{get(){return L;},set(u){_assign(wrap(u));}});
   L.assign = (u)=>_assign(wrap(u));
   L.replace = (u)=>_replaceLoc(wrap(u));
 
+  // Patch window.open
   const _open = window.open;
   window.open = (u,n,s)=>_open.call(window,wrap(u),n,s);
 })();
